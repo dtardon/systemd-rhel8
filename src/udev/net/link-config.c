@@ -447,7 +447,7 @@ int link_config_apply(link_config_ctx *ctx, link_config *config,
                 case MACPOLICY_PERSISTENT:
                         if (mac_is_random(device)) {
                                 r = get_mac(device, false, &generated_mac);
-                                if (r == -ENOENT) {
+                                if (r == -ENODATA) {
                                         log_warning_errno(r, "Could not generate persistent MAC address for %s: %m", old_name);
                                         break;
                                 } else if (r < 0)
@@ -458,7 +458,7 @@ int link_config_apply(link_config_ctx *ctx, link_config *config,
                 case MACPOLICY_RANDOM:
                         if (!mac_is_random(device)) {
                                 r = get_mac(device, true, &generated_mac);
-                                if (r == -ENOENT) {
+                                if (r == -ENODATA) {
                                         log_warning_errno(r, "Could not generate random MAC address for %s: %m", old_name);
                                         break;
                                 } else if (r < 0)
