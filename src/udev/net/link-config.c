@@ -2,13 +2,16 @@
 
 #include <netinet/ether.h>
 
+#include "sd-device.h"
 #include "sd-netlink.h"
 
 #include "alloc-util.h"
 #include "conf-files.h"
 #include "conf-parser.h"
+#include "device-util.h"
 #include "ethtool-util.h"
 #include "fd-util.h"
+#include "libudev-device-internal.h"
 #include "libudev-private.h"
 #include "link-config.h"
 #include "log.h"
@@ -186,6 +189,22 @@ static bool enable_name_policy(void) {
         return proc_cmdline_get_bool("net.ifnames", &b) <= 0 || b;
 }
 
+static int link_name_type(struct udev_device *device, unsigned *type) {
+        const char *s;
+        int r;
+
+        r = sd_device_get_sysattr_value(device->device, "name_assign_type", &s);
+        if (r < 0)
+                return log_device_debug_errno(device->device, r, "Failed to query name_assign_type: %m");
+
+        r = safe_atou(s, type);
+        if (r < 0)
+                return log_device_warning_errno(device->device, r, "Failed to parse name_assign_type \"%s\": %m", s);
+
+        log_device_debug(device->device, "Device has name_assign_type=%d", *type);
+        return 0;
+}
+
 int link_config_load(link_config_ctx *ctx) {
         _cleanup_strv_free_ char **files;
         char **f;
@@ -294,36 +313,6 @@ static bool mac_is_random(struct udev_device *device) {
         return type == NET_ADDR_RANDOM;
 }
 
-static bool should_rename(struct udev_device *device, bool respect_predictable) {
-        const char *s;
-        unsigned type;
-        int r;
-
-        /* if we can't get the assgin type, assume we should rename */
-        s = udev_device_get_sysattr_value(device, "name_assign_type");
-        if (!s)
-                return true;
-
-        r = safe_atou(s, &type);
-        if (r < 0)
-                return true;
-
-        switch (type) {
-        case NET_NAME_USER:
-                /* these were already named by userspace, do not touch again */
-                return false;
-        case NET_NAME_PREDICTABLE:
-                /* the kernel claims to have given a predictable name */
-                if (respect_predictable)
-                        return false;
-                _fallthrough_;
-        case NET_NAME_ENUM:
-        default:
-                /* the name is known to be bad, or of an unknown type */
-                return true;
-        }
-}
-
 static int get_mac(struct udev_device *device, bool want_random,
                    struct ether_addr *mac) {
         int r;
@@ -351,12 +340,12 @@ static int get_mac(struct udev_device *device, bool want_random,
 int link_config_apply(link_config_ctx *ctx, link_config *config,
                       struct udev_device *device, const char **name) {
         _cleanup_strv_free_ char **altnames = NULL, **current_altnames = NULL;
-        bool respect_predictable = false;
         struct ether_addr generated_mac;
         struct ether_addr *mac = NULL;
         const char *new_name = NULL;
         const char *old_name;
-        unsigned speed;
+        unsigned speed, name_type = NET_NAME_UNKNOWN;
+        NamePolicy policy;
         int r, ifindex;
 
         assert(ctx);
@@ -404,44 +393,55 @@ int link_config_apply(link_config_ctx *ctx, link_config *config,
                 return -ENODEV;
         }
 
-        if (ctx->enable_name_policy && config->name_policy) {
-                NamePolicy *policy;
 
-                for (policy = config->name_policy;
-                     *policy != _NAMEPOLICY_INVALID; policy++) {
-                        switch (*policy) {
-                                case NAMEPOLICY_KERNEL:
-                                        respect_predictable = true;
-                                        break;
-                                case NAMEPOLICY_DATABASE:
-                                        new_name = udev_device_get_property_value(device, "ID_NET_NAME_FROM_DATABASE");
-                                        break;
-                                case NAMEPOLICY_ONBOARD:
-                                        new_name = udev_device_get_property_value(device, "ID_NET_NAME_ONBOARD");
-                                        break;
-                                case NAMEPOLICY_SLOT:
-                                        new_name = udev_device_get_property_value(device, "ID_NET_NAME_SLOT");
-                                        break;
-                                case NAMEPOLICY_PATH:
-                                        new_name = udev_device_get_property_value(device, "ID_NET_NAME_PATH");
-                                        break;
-                                case NAMEPOLICY_MAC:
-                                        new_name = udev_device_get_property_value(device, "ID_NET_NAME_MAC");
-                                        break;
-                                default:
-                                        break;
-                        }
-                        if (ifname_valid(new_name))
-                                break;
-                }
+        (void) link_name_type(device, &name_type);
+
+        if (IN_SET(name_type, NET_NAME_USER, NET_NAME_RENAMED)) {
+                log_device_info(device->device, "Device already has a name given by userspace, not renaming.");
+                goto no_rename;
         }
 
-        if (should_rename(device, respect_predictable)) {
-                /* if not set by policy, fall back manually set name */
-                if (!new_name)
-                        new_name = config->name;
+        if (ctx->enable_name_policy && config->name_policy)
+                for (NamePolicy *p = config->name_policy; !new_name && *p != _NAMEPOLICY_INVALID; p++) {
+                        policy = *p;
+
+                        switch (policy) {
+                        case NAMEPOLICY_KERNEL:
+                                if (name_type != NET_NAME_PREDICTABLE)
+                                        continue;
+
+                                /* The kernel claims to have given a predictable name, keep it. */
+                                log_device_debug(device->device, "Policy *%s*: keeping predictable kernel name",
+                                                 name_policy_to_string(policy));
+                                goto no_rename;
+                        case NAMEPOLICY_DATABASE:
+                                new_name = udev_device_get_property_value(device, "ID_NET_NAME_FROM_DATABASE");
+                                break;
+                        case NAMEPOLICY_ONBOARD:
+                                new_name = udev_device_get_property_value(device, "ID_NET_NAME_ONBOARD");
+                                break;
+                        case NAMEPOLICY_SLOT:
+                                new_name = udev_device_get_property_value(device, "ID_NET_NAME_SLOT");
+                                break;
+                        case NAMEPOLICY_PATH:
+                                new_name = udev_device_get_property_value(device, "ID_NET_NAME_PATH");
+                                break;
+                        case NAMEPOLICY_MAC:
+                                new_name = udev_device_get_property_value(device, "ID_NET_NAME_MAC");
+                                break;
+                        default:
+                                assert_not_reached("invalid policy");
+                        }
+                }
+
+        if (new_name)
+                log_device_debug(device->device, "Policy *%s* yields \"%s\".", name_policy_to_string(policy), new_name);
+        else if (config->name) {
+                new_name = config->name;
+                log_device_debug(device->device, "Policies didn't yield a name, using specified Name=%s.", new_name);
         } else
-                new_name = NULL;
+                log_device_debug(device->device, "Policies didn't yield a name and Name= is not given, not renaming.");
+ no_rename:
 
         switch (config->mac_policy) {
                 case MACPOLICY_PERSISTENT:
