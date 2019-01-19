@@ -189,19 +189,19 @@ static bool enable_name_policy(void) {
         return proc_cmdline_get_bool("net.ifnames", &b) <= 0 || b;
 }
 
-static int link_name_type(struct udev_device *device, unsigned *type) {
+static int link_unsigned_attribute(sd_device *device, const char *attr, unsigned *type) {
         const char *s;
         int r;
 
-        r = sd_device_get_sysattr_value(device->device, "name_assign_type", &s);
+        r = sd_device_get_sysattr_value(device, attr, &s);
         if (r < 0)
-                return log_device_debug_errno(device->device, r, "Failed to query name_assign_type: %m");
+                return log_device_debug_errno(device, r, "Failed to query %s: %m", attr);
 
         r = safe_atou(s, type);
         if (r < 0)
-                return log_device_warning_errno(device->device, r, "Failed to parse name_assign_type \"%s\": %m", s);
+                return log_device_warning_errno(device, r, "Failed to parse %s \"%s\": %m", attr, s);
 
-        log_device_debug(device->device, "Device has name_assign_type=%d", *type);
+        log_device_debug(device, "Device has %s=%u", attr, *type);
         return 0;
 }
 
@@ -262,11 +262,9 @@ int link_config_get(link_config_ctx *ctx, struct udev_device *device,
                                      udev_device_get_sysname(device),
                                      NULL)) {
                         if (link->match_name) {
-                                unsigned char name_assign_type = NET_NAME_UNKNOWN;
+                                unsigned name_assign_type = NET_NAME_UNKNOWN;
 
-                                attr_value = udev_device_get_sysattr_value(device, "name_assign_type");
-                                if (attr_value)
-                                        (void) safe_atou8(attr_value, &name_assign_type);
+                                (void) link_unsigned_attribute(device->device, "name_assign_type", &name_assign_type);
 
                                 if (name_assign_type == NET_NAME_ENUM) {
                                         log_warning("Config file %s applies to device based on potentially unpredictable interface name '%s'",
@@ -296,35 +294,41 @@ int link_config_get(link_config_ctx *ctx, struct udev_device *device,
         return -ENOENT;
 }
 
-static bool mac_is_random(struct udev_device *device) {
-        const char *s;
-        unsigned type;
+static int get_mac(struct udev_device *device, MACPolicy policy, struct ether_addr *mac) {
+        unsigned addr_type;
+        bool want_random = policy == MACPOLICY_RANDOM;
         int r;
 
-        /* if we can't get the assign type, assume it is not random */
-        s = udev_device_get_sysattr_value(device, "addr_assign_type");
-        if (!s)
-                return false;
+        assert(IN_SET(policy, MACPOLICY_RANDOM, MACPOLICY_PERSISTENT));
 
-        r = safe_atou(s, &type);
+        r = link_unsigned_attribute(device->device, "addr_assign_type", &addr_type);
         if (r < 0)
-                return false;
+                return r;
+        switch (addr_type) {
+        case NET_ADDR_SET:
+                return log_device_debug(device->device, "MAC on the device already set by userspace");
+        case NET_ADDR_STOLEN:
+                return log_device_debug(device->device, "MAC on the device already set based on another device");
+        case NET_ADDR_RANDOM:
+        case NET_ADDR_PERM:
+                break;
+        default:
+                return log_device_warning(device->device, "Unknown addr_assign_type %u, ignoring", addr_type);
+        }
 
-        return type == NET_ADDR_RANDOM;
-}
+        if (want_random == (addr_type == NET_ADDR_RANDOM))
+                return log_device_debug(device->device, "MAC on the device already matches policy *%s*",
+                                        mac_policy_to_string(policy));
 
-static int get_mac(struct udev_device *device, bool want_random,
-                   struct ether_addr *mac) {
-        int r;
-
-        if (want_random)
+        if (want_random) {
+                log_device_debug(device->device, "Using random bytes to generate MAC");
                 random_bytes(mac->ether_addr_octet, ETH_ALEN);
-        else {
+        } else {
                 uint64_t result;
 
                 r = net_get_unique_predictable_data(device, &result);
                 if (r < 0)
-                        return r;
+                        return log_device_warning_errno(device->device, r, "Could not generate persistent MAC: %m");
 
                 assert_cc(ETH_ALEN <= sizeof(result));
                 memcpy(mac->ether_addr_octet, &result, ETH_ALEN);
@@ -333,8 +337,7 @@ static int get_mac(struct udev_device *device, bool want_random,
         /* see eth_random_addr in the kernel */
         mac->ether_addr_octet[0] &= 0xfe;  /* clear multicast bit */
         mac->ether_addr_octet[0] |= 0x02;  /* set local assignment bit (IEEE802) */
-
-        return 0;
+        return 1;
 }
 
 int link_config_apply(link_config_ctx *ctx, link_config *config,
@@ -394,7 +397,7 @@ int link_config_apply(link_config_ctx *ctx, link_config *config,
         }
 
 
-        (void) link_name_type(device, &name_type);
+        (void) link_unsigned_attribute(device->device, "name_assign_type", &name_type);
 
         if (IN_SET(name_type, NET_NAME_USER, NET_NAME_RENAMED)) {
                 log_device_info(device->device, "Device already has a name given by userspace, not renaming.");
@@ -443,33 +446,11 @@ int link_config_apply(link_config_ctx *ctx, link_config *config,
                 log_device_debug(device->device, "Policies didn't yield a name and Name= is not given, not renaming.");
  no_rename:
 
-        switch (config->mac_policy) {
-                case MACPOLICY_PERSISTENT:
-                        if (mac_is_random(device)) {
-                                r = get_mac(device, false, &generated_mac);
-                                if (r == -ENODATA) {
-                                        log_warning_errno(r, "Could not generate persistent MAC address for %s: %m", old_name);
-                                        break;
-                                } else if (r < 0)
-                                        return r;
-                                mac = &generated_mac;
-                        }
-                        break;
-                case MACPOLICY_RANDOM:
-                        if (!mac_is_random(device)) {
-                                r = get_mac(device, true, &generated_mac);
-                                if (r == -ENODATA) {
-                                        log_warning_errno(r, "Could not generate random MAC address for %s: %m", old_name);
-                                        break;
-                                } else if (r < 0)
-                                        return r;
-                                mac = &generated_mac;
-                        }
-                        break;
-                case MACPOLICY_NONE:
-                default:
-                        mac = config->mac;
-        }
+        if (IN_SET(config->mac_policy, MACPOLICY_PERSISTENT, MACPOLICY_RANDOM)) {
+                if (get_mac(device, config->mac_policy, &generated_mac) > 0)
+                        mac = &generated_mac;
+        } else
+                mac = config->mac;
 
         r = rtnl_set_link_properties(&ctx->rtnl, ifindex, config->alias, mac, config->mtu);
         if (r < 0)
