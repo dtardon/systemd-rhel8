@@ -696,6 +696,27 @@ struct input_mask {
 #define IN6_ADDR_GEN_MODE_STABLE_PRIVACY 2
 #endif
 
+/* netdevice.h */
+#ifndef NET_ADDR_PERM
+#define NET_ADDR_PERM 0
+#endif
+
+#ifndef NET_ADDR_RANDOM
+#define NET_ADDR_RANDOM 1
+#endif
+
+#ifndef NET_ADDR_STOLEN
+#define NET_ADDR_STOLEN 2
+#endif
+
+#ifndef NET_ADDR_SET
+#define NET_ADDR_SET 3
+#endif
+
+#ifndef NET_NAME_UNKNOWN
+#define NET_NAME_UNKNOWN 0
+#endif
+
 #if !HAVE_IFLA_MACVLAN_FLAGS
 #define IFLA_MACVLAN_UNSPEC 0
 #define IFLA_MACVLAN_MODE 1
