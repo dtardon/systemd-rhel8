@@ -93,7 +93,7 @@ int dhcp_identifier_set_iaid(int ifindex, uint8_t *mac, size_t mac_len, void *_i
                                 /* not yet ready */
                                 return -EBUSY;
 
-                        name = net_get_name(device);
+                        name = net_get_name_persistent(device);
                 }
         }
 
