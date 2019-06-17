@@ -40,7 +40,7 @@ CONFIG_PARSER_PROTOTYPE(config_parse_ifalias);
 CONFIG_PARSER_PROTOTYPE(config_parse_iaid);
 CONFIG_PARSER_PROTOTYPE(config_parse_bridge_port_priority);
 
-int net_get_unique_predictable_data(struct udev_device *device, uint64_t *result);
+int net_get_unique_predictable_data(struct udev_device *device, bool use_sysname, uint64_t *result);
 const char *net_get_name_persistent(struct udev_device *device);
 
 void serialize_in_addrs(FILE *f, const struct in_addr *addresses, size_t size);

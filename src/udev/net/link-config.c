@@ -16,6 +16,7 @@
 #include "link-config.h"
 #include "log.h"
 #include "missing.h"
+#include "naming-scheme.h"
 #include "netlink-util.h"
 #include "network-internal.h"
 #include "parse-util.h"
@@ -326,10 +327,13 @@ static int get_mac(struct udev_device *device, MACPolicy policy, struct ether_ad
         } else {
                 uint64_t result;
 
-                r = net_get_unique_predictable_data(device, &result);
+                r = net_get_unique_predictable_data(device,
+                                                    naming_scheme_has(NAMING_STABLE_VIRTUAL_MACS),
+                                                    &result);
                 if (r < 0)
                         return log_device_warning_errno(device->device, r, "Could not generate persistent MAC: %m");
 
+                log_device_debug(device->device, "Using generated persistent MAC address");
                 assert_cc(ETH_ALEN <= sizeof(result));
                 memcpy(mac->ether_addr_octet, &result, ETH_ALEN);
         }

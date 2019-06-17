@@ -24,6 +24,7 @@ typedef enum NamingSchemeFlags {
         /* First, the individual features */
         NAMING_SR_IOV_V        = 1 << 0, /* Use "v" suffix for SR-IOV, see 609948c7043a40008b8299529c978ed8e11de8f6*/
         NAMING_NPAR_ARI        = 1 << 1, /* Use NPAR "ARI", see 6bc04997b6eab35d1cb9fa73889892702c27be09 */
+        NAMING_STABLE_VIRTUAL_MACS = 1 << 5, /* Use device name to generate MAC, see 6d3646406560 */
         NAMING_BRIDGE_NO_SLOT  = 1 << 9, /* Don't use PCI hotplug slot information if the corresponding device is a PCI bridge */
         NAMING_SLOT_FUNCTION_ID = 1 << 10, /* Use function_id if present to identify PCI hotplug slots */
         NAMING_16BIT_INDEX      = 1 << 11, /* Allow full 16-bit for the onboard index */
@@ -38,7 +39,7 @@ typedef enum NamingSchemeFlags {
         NAMING_RHEL_8_4 = NAMING_V239|NAMING_BRIDGE_NO_SLOT,
         NAMING_RHEL_8_5 = NAMING_RHEL_8_4,
         NAMING_RHEL_8_6 = NAMING_RHEL_8_4,
-        NAMING_RHEL_8_7 = NAMING_RHEL_8_4|NAMING_SLOT_FUNCTION_ID|NAMING_16BIT_INDEX,
+        NAMING_RHEL_8_7 = NAMING_RHEL_8_4|NAMING_SLOT_FUNCTION_ID|NAMING_16BIT_INDEX|NAMING_STABLE_VIRTUAL_MACS,
 
         _NAMING_SCHEME_FLAGS_INVALID = -1,
 } NamingSchemeFlags;

@@ -207,7 +207,7 @@ int ipv4ll_configure(Link *link) {
         }
 
         if (link->udev_device) {
-                r = net_get_unique_predictable_data(link->udev_device, &seed);
+                r = net_get_unique_predictable_data(link->udev_device, true, &seed);
                 if (r >= 0) {
                         r = sd_ipv4ll_set_address_seed(link->ipv4ll, seed);
                         if (r < 0)

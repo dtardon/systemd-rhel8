@@ -327,6 +327,17 @@
           index. To prevent the generation of bogus onbard interface names, index numbers greater than 16381
           (2^14-1) were ignored. For s390 PCI devices index values up to 65535 (2^16-1) are valid. To account
           for that, the limit is increased to now 65535.</para></listitem>
+
+          <listitem><para><option>MACAddressPolicy=persistent</option> was extended to set MAC addresses
+          based on the device name. Previously addresses were only based on the
+          <varname noindex='true'>ID_NET_NAME_*</varname> attributes, which meant that interface names would
+          never be generated for virtual devices. Now a persistent address will be generated for most
+          devices, including in particular bridges.</para>
+
+          <para>Note: when userspace does not set a MAC address for a bridge device, the kernel will
+          initially assign a random address, and then change it when the first device is enslaved to the
+          bridge. With this naming policy change, bridges get a persistent MAC address based on the bridge
+          name instead of the first enslaved device.</para></listitem>
         </varlistentry>
 
         <para>Note that <constant>latest</constant> may be used to denote the latest scheme known to this
