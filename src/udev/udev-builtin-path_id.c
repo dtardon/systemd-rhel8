@@ -542,7 +542,7 @@ static struct udev_device *handle_ap(struct udev_device *parent, char **path) {
 
 static int find_real_nvme_parent(struct udev_device *dev, struct udev_device **ret) {
         _cleanup_(udev_device_unrefp) struct udev_device *nvme = NULL;
-        const char *sysname, *end;
+        const char *sysname, *end, *devpath;
 
         /* If the device belongs to "nvme-subsystem" (not to be confused with "nvme"), which happens when
          * NVMe multipathing is enabled in the kernel (/sys/module/nvme_core/parameters/multipath is Y),
@@ -572,6 +572,14 @@ static int find_real_nvme_parent(struct udev_device *dev, struct udev_device **r
         nvme = udev_device_new_from_subsystem_sysname(udev_device_get_udev(dev), "nvme", sysname);
         if (!nvme)
                 return -errno;
+
+        devpath = udev_device_get_devpath(nvme);
+        if (!devpath)
+                return -ENOENT;
+
+        /* If the 'real parent' is (still) virtual, e.g. for nvmf disks, refuse to set ID_PATH. */
+        if (path_startswith(devpath, "/devices/virtual/"))
+                return -ENXIO;
 
         *ret = TAKE_PTR(nvme);
         return 0;
