@@ -1153,7 +1153,7 @@ good:
         unit_gc_mark_good(u, gc_marker);
 }
 
-static unsigned manager_dispatch_gc_unit_queue(Manager *m) {
+unsigned manager_dispatch_gc_unit_queue(Manager *m) {
         unsigned n = 0, gc_marker;
         Unit *u;
 

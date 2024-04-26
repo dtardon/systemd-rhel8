@@ -415,6 +415,7 @@ void manager_clear_jobs(Manager *m);
 void manager_unwatch_pid(Manager *m, pid_t pid);
 
 unsigned manager_dispatch_load_queue(Manager *m);
+unsigned manager_dispatch_gc_unit_queue(Manager *m);
 
 int manager_environment_add(Manager *m, char **minus, char **plus);
 int manager_set_default_rlimits(Manager *m, struct rlimit **default_rlimit);

@@ -887,13 +887,22 @@ static int transient_unit_from_message(
         if (!unit_vtable[t]->can_transient)
                 return sd_bus_error_setf(error, SD_BUS_ERROR_INVALID_ARGS, "Unit type %s does not support transient units.", unit_type_to_string(t));
 
-        r = manager_load_unit(m, name, NULL, error, &u);
-        if (r < 0)
-                return r;
+        for (int i = 0; i < 2; i++) {
+                r = manager_load_unit(m, name, NULL, error, &u);
+                if (r < 0)
+                        return r;
 
-        if (!unit_is_pristine(u))
-                return sd_bus_error_setf(error, BUS_ERROR_UNIT_EXISTS,
-                                         "Unit %s was already loaded or has a fragment file.", name);
+                if (unit_is_pristine(u))
+                        break;
+
+                if (i > 0 || !u->transient || !u->in_gc_queue)
+                        return sd_bus_error_setf(error, BUS_ERROR_UNIT_EXISTS,
+                                "Unit %s was already loaded or has a fragment file.", name);
+
+                manager_dispatch_gc_unit_queue(m);
+
+                u = NULL;
+        }
 
         /* OK, the unit failed to load and is unreferenced, now let's
          * fill in the transient data instead */
